@@ -1,0 +1,97 @@
+name: Monitor and Build Docker Image
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Check every 6 hours
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  SOURCE_REPO: tenninjas/torrent_checker
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+
+      - name: Get latest release from source repository
+        id: get_release
+        run: |
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ env.SOURCE_REPO }}/releases/latest | jq -r '.tag_name')
+          echo "latest_tag=${LATEST_RELEASE}" >> $GITHUB_OUTPUT
+          echo "Latest release: ${LATEST_RELEASE}"
+
+      - name: Check if already built
+        id: check_built
+        run: |
+          LATEST_TAG="${{ steps.get_release.outputs.latest_tag }}"
+
+          # Try to get the last built tag from a file in the repo
+          if [ -f last_built_tag.txt ]; then
+            LAST_BUILT=$(cat last_built_tag.txt)
+          else
+            LAST_BUILT="none"
+          fi
+
+          echo "last_built=${LAST_BUILT}" >> $GITHUB_OUTPUT
+
+          if [ "${LATEST_TAG}" != "${LAST_BUILT}" ]; then
+            echo "needs_build=true" >> $GITHUB_OUTPUT
+            echo "New release detected: ${LATEST_TAG} (last built: ${LAST_BUILT})"
+          else
+            echo "needs_build=false" >> $GITHUB_OUTPUT
+            echo "Already built: ${LATEST_TAG}"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check_built.outputs.needs_build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: steps.check_built.outputs.needs_build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.check_built.outputs.needs_build == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.get_release.outputs.latest_tag }}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        if: steps.check_built.outputs.needs_build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            RELEASE_TAG=${{ steps.get_release.outputs.latest_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update last built tag
+        if: steps.check_built.outputs.needs_build == 'true'
+        run: |
+          echo "${{ steps.get_release.outputs.latest_tag }}" > last_built_tag.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_built_tag.txt
+          git commit -m "Update last built tag to ${{ steps.get_release.outputs.latest_tag }}"
+          git push
