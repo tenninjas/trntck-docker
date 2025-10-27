@@ -17,7 +17,7 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 # Clone the specific release from the torrent_checker repository
-RUN git clone --depth 1 --branch ${RELEASE_TAG} https://github.com/thenunner/torrent_checker.git /app
+RUN git clone --depth 1 --branch ${RELEASE_TAG} https://github.com/tenninjas/torrent_checker.git /app
 
 # Install Python dependencies
 RUN if [ -f requirements.txt ]; then pip3 install --break-system-packages --no-cache-dir -r requirements.txt; fi
