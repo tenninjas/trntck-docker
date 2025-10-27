@@ -55,4 +55,4 @@ EOF
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["python3", "main.py"]
+CMD ["python3", "torrent_check.py"]
